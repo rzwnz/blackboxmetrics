@@ -1,3 +1,4 @@
+# CI for blackboxmetrics project.
 name: CI
 
 on:

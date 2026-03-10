@@ -1,0 +1,150 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# VictoriaMetrics alert rules (vmalert / recording-rules compatible)
+# These rules can be evaluated by vmalert or converted for use with Alertmanager
+# ──────────────────────────────────────────────────────────────────────────────
+
+groups:
+  # ── System health ──────────────────────────────────────────────────────────
+  - name: system
+    interval: 1m
+    rules:
+      - alert: HighCpuUsage
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CPU usage above 90% for 5 minutes"
+          description: "Current value: {{ $value | humanizePercentage }}"
+
+      - alert: CriticalCpuUsage
+        expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) > 0.95
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "CPU usage above 95% for 10 minutes"
+
+      - alert: HighMemoryUsage
+        expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Memory usage above 85%"
+          description: "Available: {{ with query \"node_memory_MemAvailable_bytes\" }}{{ . | first | value | humanize1024 }}B{{ end }}"
+
+      - alert: CriticalMemoryUsage
+        expr: 1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Memory usage above 95% – risk of OOM"
+
+      - alert: DiskSpaceLow
+        expr: 1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Root filesystem usage above 85%"
+          description: "Free: {{ with query \"node_filesystem_avail_bytes{mountpoint='/'}\" }}{{ . | first | value | humanize1024 }}B{{ end }}"
+
+      - alert: DiskSpaceCritical
+        expr: 1 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"}) > 0.95
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Root filesystem usage above 95%"
+
+      - alert: HighDiskIOWait
+        expr: avg(rate(node_cpu_seconds_total{mode="iowait"}[5m])) > 0.15
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "I/O wait time above 15% for 10 minutes"
+
+      - alert: HighLoadAverage
+        expr: node_load15 > count(node_cpu_seconds_total{mode="idle"}) * 2
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "15-minute load average exceeds 2× CPU core count"
+
+  # ── S3 / Garage storage ────────────────────────────────────────────────────
+  - name: s3
+    interval: 2m
+    rules:
+      - alert: S3BucketDown
+        expr: s3_bucket_up == 0
+        for: 3m
+        labels:
+          severity: critical
+        annotations:
+          summary: "S3 bucket {{ $labels.bucket }} is unreachable"
+
+      - alert: S3BucketSizeTooLarge
+        expr: s3_bucket_size_bytes > 50 * 1024 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Bucket {{ $labels.bucket }} exceeds 50 GB"
+          description: "Current size: {{ $value | humanize1024 }}B"
+
+      - alert: S3ExporterErrors
+        expr: rate(s3_exporter_scrape_errors_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "S3 exporter is producing scrape errors"
+
+  # ── Tomcat ─────────────────────────────────────────────────────────────────
+  - name: tomcat
+    interval: 1m
+    rules:
+      - alert: TomcatDown
+        expr: tomcat_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tomcat server is down"
+
+      - alert: TomcatHighThreadUsage
+        expr: tomcat_connector_thread_busy / tomcat_connector_thread_max > 0.85
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tomcat connector {{ $labels.connector }} thread pool >85% busy"
+
+      - alert: TomcatHighErrorRate
+        expr: rate(tomcat_connector_error_count_total[5m]) / rate(tomcat_connector_request_count_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tomcat error rate above 5%"
+          description: "Connector {{ $labels.connector }}: {{ $value | humanizePercentage }}"
+
+      - alert: TomcatHighJvmMemory
+        expr: 1 - (tomcat_jvm_memory_free_bytes / tomcat_jvm_memory_total_bytes) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tomcat JVM heap usage above 90%"
+
+      - alert: TomcatSlowRequests
+        expr: rate(tomcat_connector_processing_time_ms_total[5m]) / rate(tomcat_connector_request_count_total[5m]) > 2000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tomcat average request latency above 2 seconds"

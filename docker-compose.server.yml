@@ -1,0 +1,115 @@
+# =============================================================
+# Server-side Docker Compose: deploys on the Astra Linux server
+# VictoriaMetrics (single-node) + Node Exporter + custom exporters
+# Runs air-gapped; no external network access.
+# =============================================================
+services:
+  # ── VictoriaMetrics: lightweight single-node TSDB ──
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    container_name: victoriametrics
+    restart: unless-stopped
+    ports:
+      - "8428:8428"    # HTTP API (write + query)
+    volumes:
+      - vm-data:/victoria-metrics-data
+    command:
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=90d"
+      - "-httpListenAddr=:8428"
+      - "-promscrape.config=/etc/prometheus/prometheus.yml"
+    configs:
+      - source: prometheus-config
+        target: /etc/prometheus/prometheus.yml
+    networks:
+      - monitoring
+
+  # ── Node Exporter: system-level metrics (CPU, RAM, disk, network) ──
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    networks:
+      - monitoring
+
+  # ── S3 (Garage) Exporter: custom Python exporter for S3 stats ──
+  s3-exporter:
+    build:
+      context: ./exporters/s3-exporter
+      dockerfile: Dockerfile
+    container_name: s3-exporter
+    restart: unless-stopped
+    ports:
+      - "9340:9340"
+    environment:
+      - S3_ENDPOINT=${S3_ENDPOINT:-http://garage:3900}
+      - S3_ACCESS_KEY=${S3_ACCESS_KEY:-}
+      - S3_SECRET_KEY=${S3_SECRET_KEY:-}
+      - S3_BUCKET=${S3_BUCKET:-tandem-files}
+      - EXPORTER_PORT=9340
+      - SCRAPE_INTERVAL=60
+    networks:
+      - monitoring
+
+  # ── Tomcat Exporter: scrapes Tomcat JMX/status metrics ──
+  tomcat-exporter:
+    build:
+      context: ./exporters/tomcat-exporter
+      dockerfile: Dockerfile
+    container_name: tomcat-exporter
+    restart: unless-stopped
+    ports:
+      - "9341:9341"
+    environment:
+      - TOMCAT_URL=${TOMCAT_URL:-http://localhost:8080}
+      - TOMCAT_STATUS_PATH=/manager/status/all?XML=true
+      - TOMCAT_USER=${TOMCAT_USER:-admin}
+      - TOMCAT_PASSWORD=${TOMCAT_PASSWORD:-}
+      - EXPORTER_PORT=9341
+    networks:
+      - monitoring
+
+  # ── vmalert: evaluates alerting rules against VictoriaMetrics ──
+  vmalert:
+    image: victoriametrics/vmalert:v1.106.1
+    container_name: vmalert
+    restart: unless-stopped
+    command:
+      - "-rule=/etc/alerts/alert-rules.yml"
+      - "-datasource.url=http://victoriametrics:8428"
+      - "-evaluationInterval=1m"
+      - "-httpListenAddr=:8880"
+    configs:
+      - source: alert-rules
+        target: /etc/alerts/alert-rules.yml
+    depends_on:
+      - victoriametrics
+    ports:
+      - "8880:8880"
+    networks:
+      - monitoring
+
+configs:
+  prometheus-config:
+    file: ./prometheus/prometheus.yml
+  alert-rules:
+    file: ./alerting/alert-rules.yml
+
+volumes:
+  vm-data:
+    driver: local
+
+networks:
+  monitoring:
+    driver: bridge

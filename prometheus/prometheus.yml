@@ -1,0 +1,38 @@
+# VictoriaMetrics scrape configuration (Prometheus-compatible)
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+
+scrape_configs:
+  # ── System metrics via Node Exporter ──
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          instance: "astra-server"
+          environment: "production"
+
+  # ── S3 / Garage storage metrics ──
+  - job_name: "s3-garage"
+    scrape_interval: 60s
+    static_configs:
+      - targets: ["s3-exporter:9340"]
+        labels:
+          instance: "garage-s3"
+          environment: "production"
+
+  # ── Tomcat application server metrics ──
+  - job_name: "tomcat"
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["tomcat-exporter:9341"]
+        labels:
+          instance: "tomcat-main"
+          environment: "production"
+
+  # ── VictoriaMetrics self-monitoring ──
+  - job_name: "victoriametrics"
+    static_configs:
+      - targets: ["localhost:8428"]
+        labels:
+          instance: "vm-server"

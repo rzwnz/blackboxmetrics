@@ -1,0 +1,77 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r exporters/s3-exporter/requirements.txt
+          pip install -r exporters/tomcat-exporter/requirements.txt
+          pip install coverage
+
+      - name: Validate compose files
+        run: |
+          cp .env.example .env
+          docker compose -f docker-compose.server.yml config > /dev/null
+          docker compose -f docker-compose.analysis.yml config > /dev/null
+
+      - name: Validate shell scripts
+        run: |
+          bash -n scripts/dump-metrics.sh
+          bash -n scripts/import-metrics.sh
+
+      - name: Validate Python syntax
+        run: |
+          python -m py_compile exporters/s3-exporter/s3_exporter.py
+          python -m py_compile exporters/tomcat-exporter/tomcat_exporter.py
+
+      - name: Run exporter unit tests
+        run: |
+          python -m unittest discover -s tests -p "test_*.py"
+
+      - name: Generate lightweight coverage
+        run: |
+          python - <<'PY'
+          import coverage
+          import runpy
+
+          cov = coverage.Coverage(
+              source=["exporters/s3-exporter", "exporters/tomcat-exporter"]
+          )
+          cov.start()
+          runpy.run_path("exporters/s3-exporter/s3_exporter.py", run_name="cov_s3")
+          runpy.run_path("exporters/tomcat-exporter/tomcat_exporter.py", run_name="cov_tomcat")
+          cov.stop()
+          cov.save()
+          cov.xml_report(outfile="coverage.xml")
+          PY
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-blackboxmetrics
+          path: coverage.xml
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          flags: blackboxmetrics
+          fail_ci_if_error: false

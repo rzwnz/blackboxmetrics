@@ -1,0 +1,52 @@
+# =============================================================
+# Developer-side Docker Compose: offline analysis workstation
+# Import VictoriaMetrics dump and visualize with Grafana.
+# =============================================================
+services:
+  # ── VictoriaMetrics: local instance for ingesting imported data ──
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    container_name: vm-local
+    restart: unless-stopped
+    ports:
+      - "8428:8428"
+    volumes:
+      - vm-local-data:/victoria-metrics-data
+      - ./import:/import:ro
+    command:
+      - "-storageDataPath=/victoria-metrics-data"
+      - "-retentionPeriod=365d"
+      - "-httpListenAddr=:8428"
+    networks:
+      - analysis
+
+  # ── Grafana: dashboards for offline analysis ──
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: grafana-local
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - victoriametrics
+    networks:
+      - analysis
+
+volumes:
+  vm-local-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+networks:
+  analysis:
+    driver: bridge
